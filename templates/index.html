@@ -1,0 +1,234 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>ML Collage Installation</title>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+
+    body {
+      background: #0a0a0a;
+      color: #e8e8e8;
+      font-family: 'Courier New', monospace;
+      min-height: 100vh;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      padding: 2rem;
+    }
+
+    h1 {
+      font-size: 1.1rem;
+      font-weight: normal;
+      letter-spacing: 0.3em;
+      text-transform: uppercase;
+      color: #555;
+      margin-bottom: 2rem;
+    }
+
+    /* ── Status bar ── */
+    #status-bar {
+      display: flex;
+      align-items: center;
+      gap: 1rem;
+      margin-bottom: 2.5rem;
+    }
+
+    #status-dot {
+      width: 12px;
+      height: 12px;
+      border-radius: 50%;
+      background: #444;
+      transition: background 0.4s;
+      flex-shrink: 0;
+    }
+    #status-dot.idle       { background: #444; }
+    #status-dot.processing { background: #f5a623; animation: pulse 1s infinite; }
+    #status-dot.done       { background: #4caf50; }
+    #status-dot.error      { background: #e53935; }
+
+    @keyframes pulse {
+      0%, 100% { opacity: 1; }
+      50%       { opacity: 0.3; }
+    }
+
+    #status-message {
+      font-size: 0.95rem;
+      color: #aaa;
+      letter-spacing: 0.05em;
+    }
+
+    /* ── Main layout ── */
+    #main {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 2rem;
+      width: 100%;
+      max-width: 1200px;
+    }
+
+    .panel {
+      display: flex;
+      flex-direction: column;
+      gap: 0.75rem;
+    }
+
+    .panel-label {
+      font-size: 0.7rem;
+      letter-spacing: 0.25em;
+      text-transform: uppercase;
+      color: #444;
+    }
+
+    .panel img {
+      width: 100%;
+      border: 1px solid #1e1e1e;
+      background: #111;
+      display: block;
+    }
+
+    /* ── Detections ── */
+    #detections {
+      width: 100%;
+      max-width: 1200px;
+      margin-top: 2rem;
+    }
+
+    #detections-label {
+      font-size: 0.7rem;
+      letter-spacing: 0.25em;
+      text-transform: uppercase;
+      color: #444;
+      margin-bottom: 0.75rem;
+    }
+
+    #detection-list {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 0.5rem;
+    }
+
+    .detection-chip {
+      background: #161616;
+      border: 1px solid #2a2a2a;
+      padding: 0.3rem 0.75rem;
+      font-size: 0.8rem;
+      color: #888;
+      letter-spacing: 0.05em;
+    }
+
+    .detection-chip span {
+      color: #e8e8e8;
+    }
+
+    /* ── Empty state ── */
+    .empty {
+      width: 100%;
+      aspect-ratio: 4/3;
+      background: #111;
+      border: 1px solid #1e1e1e;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      color: #333;
+      font-size: 0.85rem;
+      letter-spacing: 0.1em;
+    }
+  </style>
+</head>
+<body>
+
+  <h1>ML Collage Installation</h1>
+
+  <div id="status-bar">
+    <div id="status-dot" class="idle"></div>
+    <div id="status-message">Waiting for capture...</div>
+  </div>
+
+  <div id="main">
+    <div class="panel">
+      <div class="panel-label">Captured Image</div>
+      <div id="capture-wrap" class="empty">no capture yet</div>
+    </div>
+    <div class="panel">
+      <div class="panel-label">Generated Output</div>
+      <div id="output-wrap" class="empty">awaiting pipeline...</div>
+    </div>
+  </div>
+
+  <div id="detections">
+    <div id="detections-label">Detected Objects</div>
+    <div id="detection-list"></div>
+  </div>
+
+  <script>
+    let lastGifUrl = null;
+
+    function setStatus(status, message) {
+      const dot = document.getElementById('status-dot');
+      dot.className = '';
+      dot.classList.add(status);
+      document.getElementById('status-message').textContent = message;
+    }
+
+    function updateCapture(url) {
+      const wrap = document.getElementById('capture-wrap');
+      if (!url) return;
+      wrap.innerHTML = `<img src="${url}" alt="captured">`;
+    }
+
+    function updateOutput(url) {
+      const wrap = document.getElementById('output-wrap');
+      if (!url) {
+        wrap.innerHTML = '<div class="empty" style="width:100%;aspect-ratio:4/3">awaiting pipeline...</div>';
+        return;
+      }
+      // Always reload the GIF element so the animation restarts
+      wrap.innerHTML = `<img src="${url}" alt="output gif">`;
+    }
+
+    function updateDetections(detections) {
+      const list = document.getElementById('detection-list');
+      if (!detections || detections.length === 0) {
+        list.innerHTML = '<span style="color:#333;font-size:0.8rem">none yet</span>';
+        return;
+      }
+      list.innerHTML = detections.map(d =>
+        `<div class="detection-chip">
+          <span>${d.label}</span>
+          &nbsp;${(d.confidence * 100).toFixed(0)}%
+          &nbsp;<span style="color:#555">${(d.area/1000).toFixed(1)}k px</span>
+        </div>`
+      ).join('');
+    }
+
+    async function poll() {
+      try {
+        const res  = await fetch('/status');
+        const data = await res.json();
+
+        setStatus(data.status, data.message);
+        updateCapture(data.capture_url);
+        updateDetections(data.detections);
+
+        // Only update the GIF element when the URL actually changes
+        if (data.gif_url && data.gif_url !== lastGifUrl) {
+          lastGifUrl = data.gif_url;
+          updateOutput(data.gif_url);
+        } else if (!data.gif_url) {
+          lastGifUrl = null;
+          updateOutput(null);
+        }
+
+      } catch (e) {
+        // server not up yet — keep trying
+      }
+    }
+
+    // Poll every 2 seconds
+    poll();
+    setInterval(poll, 2000);
+  </script>
+</body>
+</html>

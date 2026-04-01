@@ -1,0 +1,16 @@
+# Install PyTorch FIRST (before this file) with:
+#   pip install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu124
+#
+# Then install everything else:
+#   pip install -r requirements.txt
+
+diffusers==0.27.2
+transformers==4.40.0
+accelerate==0.29.3
+ultralytics
+opencv-python
+pillow
+numpy
+openai
+flask
+python-dotenv
