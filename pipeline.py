@@ -33,9 +33,10 @@ def load_models(hf_token, device="cuda"):
 # ── Object detection ───────────────────────────────────────────────────────────
 
 def generate_object_masks(image, model, sort_by="confidence",
-                           feather_radius=11, min_confidence=0.25, min_area=500):
+                           feather_radius=11, min_confidence=0.1, min_area=200,
+                           yolo_conf=0.1, yolo_iou=0.3):
     img_w, img_h = image.size
-    results = model(image, verbose=False)[0]
+    results = model(image, verbose=False, conf=yolo_conf, iou=yolo_iou)[0]
 
     if results.masks is None:
         return []
