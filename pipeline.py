@@ -24,7 +24,7 @@ def load_models(hf_token, device="cuda"):
     print(f"  SD pipeline loaded on {device}.")
 
     print("Loading YOLO segmentation model...")
-    yolo = YOLO("yolov8n-seg.pt")
+    yolo = YOLO("yolov8m-seg.pt")
     print("  YOLO loaded.")
 
     return pipe, yolo
@@ -88,35 +88,50 @@ def image_to_base64(image):
 
 
 def generate_inpaint_prompt(image, client, iteration=0, detected_label=None):
-    label_hint = f" The region being replaced was identified as '{detected_label}'." if detected_label else ""
-
-    system_prompt = (
-        "You are a prompt generator for an AI inpainting model in a live art installation. "
-        "Visitors arrange physical objects against a white background; their arrangements are "
-        "photographed, detected by a machine learning system, and then iteratively transformed. "
-        "Your job: look at the current image and write a concise inpainting prompt (1-2 sentences) "
-        "describing something unexpected, surreal, or conceptually opposite to what was detected. "
-        "Return ONLY the prompt text."
+    instructions = (
+        "You are a prompt generator for an AI inpainting model "
+        "that is part of a recursive art installation. A photograph is being "
+        "viewed by a vision model, with objects classified and then segmented. "
+        "The segmented masks will then be iteratively inpainted based on the prompts you provide. "
+        "At each step, a region is erased and you will repaint it based on the object's classification "
+        "as well as your own interpretation of the image.\n\n"
+        "Your job: look at the current state of the image and write a concise "
+        f"inpainting prompt (1-2 sentences max) that describes the scene and infill the object {detected_label}. "
+        f"Include key visual details  about the {detected_label} and the scene like colors, subjects, and composition, but allow "
+        "for drift and reinterpretation. The prompt should feel like a memory "
+        "of the image, not a perfect description.\n\n"
+        "Return ONLY the prompt text, nothing else."
     )
 
-    response = client.chat.completions.create(
-        model="gpt-4o",
-        messages=[
-            {"role": "system", "content": system_prompt},
-            {"role": "user", "content": [
-                {"type": "text", "text": (
-                    f"Iteration {iteration}.{label_hint} "
-                    "Write a prompt for what should replace the masked region."
-                )},
-                {"type": "image_url", "image_url": {
-                    "url": f"data:image/png;base64,{image_to_base64(image)}"
-                }},
-            ]},
+    temperature = min(0.8 + (iteration * 0.02) + np.random.random(), 1.1)
+
+    response = client.responses.create(
+        model="gpt-4.1",
+        instructions=instructions,
+        input=[
+            {
+                "role": "user",
+                "content": [
+                    {
+                        "type": "input_text",
+                        "text": (
+                            f"Iteration {iteration}. "
+                            f"Object to replace: {detected_label}. "
+                            "Write a prompt for what should replace the masked region."
+                        ),
+                    },
+                    {
+                        "type": "input_image",
+                        "image_url": f"data:image/png;base64,{image_to_base64(image)}",
+                    },
+                ],
+            }
         ],
-        max_tokens=150,
-        temperature=0.8 + (iteration * 0.02),
+        max_output_tokens=150,
+        temperature=temperature,
     )
-    return response.choices[0].message.content.strip()
+
+    return response.output_text.strip()
 
 
 # ── Inpainting ─────────────────────────────────────────────────────────────────
@@ -124,10 +139,10 @@ def generate_inpaint_prompt(image, client, iteration=0, detected_label=None):
 def custom_inpaint_variants(pipe, image, mask, prompt,
                              n_variants=2,
                              num_inference_steps=50,
-                             guidance_min=6.0,
-                             guidance_max=14.0,
-                             mask_scale=1.0,
-                             img_filter_sigma=2.0,
+                             guidance_min=5.0,
+                             guidance_max=10.0,
+                             mask_scale=0.9,
+                             img_filter_sigma=0.2,
                              enable_repaint=True,
                              device="cuda"):
     image_512 = image.resize((512, 512), Image.LANCZOS)
@@ -274,7 +289,7 @@ def run_pipeline(image_path, output_dir, pipe, yolo_model, openai_client,
         prompt = generate_inpaint_prompt(
             current_img, openai_client, iteration=i, detected_label=d["label"]
         )
-        log(f"  Prompt: {prompt}")
+        log(f"  Prompt: {prompt} {d['label']}")
 
         variants = custom_inpaint_variants(
             pipe, current_img, d["mask"], prompt,
@@ -287,6 +302,10 @@ def run_pipeline(image_path, output_dir, pipe, yolo_model, openai_client,
 
         for j, frame in enumerate(variants):
             frame.save(os.path.join(output_dir, f"iter{i:02d}_{d['label']}_v{j:02d}.png"))
+
+    # Resize all frames to a consistent size before assembling
+    gif_size = (768, 768)
+    all_frames = [f.resize(gif_size, Image.LANCZOS) for f in all_frames]
 
     gif_path = os.path.join(output_dir, "output.gif")
     assemble_gif(all_frames, gif_path)

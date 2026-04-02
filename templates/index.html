@@ -175,17 +175,19 @@
     function updateCapture(url) {
       const wrap = document.getElementById('capture-wrap');
       if (!url) return;
-      wrap.innerHTML = `<img src="${url}" alt="captured">`;
+      wrap.className = '';
+      wrap.innerHTML = `<img src="${url}" alt="captured" style="width:100%;display:block;">`;
     }
 
     function updateOutput(url) {
       const wrap = document.getElementById('output-wrap');
       if (!url) {
-        wrap.innerHTML = '<div class="empty" style="width:100%;aspect-ratio:4/3">awaiting pipeline...</div>';
+        wrap.className = 'empty';
+        wrap.innerHTML = 'awaiting pipeline...';
         return;
       }
-      // Always reload the GIF element so the animation restarts
-      wrap.innerHTML = `<img src="${url}" alt="output gif">`;
+      wrap.className = '';
+      wrap.innerHTML = `<img src="${url}" alt="output gif" style="width:100%;display:block;">`;
     }
 
     function updateDetections(detections) {

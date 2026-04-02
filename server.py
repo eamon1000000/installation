@@ -48,4 +48,4 @@ def input_file(filename):
 
 
 def run_server(host="0.0.0.0", port=5000):
-    app.run(host=host, port=port, debug=False, use_reloader=False)
+    app.run(host=host, port=port, debug=True, use_reloader=False)

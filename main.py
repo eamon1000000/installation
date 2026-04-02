@@ -1,4 +1,6 @@
 import os
+import sys
+import shutil
 import threading
 from datetime import datetime
 
@@ -151,10 +153,46 @@ def camera_loop():
     cv2.destroyAllWindows()
 
 
+# ── Test mode (no camera) ──────────────────────────────────────────────────────
+
+def test_mode(image_path):
+    """Run the pipeline on a static image, no camera needed."""
+    if not os.path.exists(image_path):
+        print(f"ERROR: Image not found: {image_path}")
+        sys.exit(1)
+
+    # Copy image into input dir so the browser can show it
+    capture_filename = "test_" + os.path.basename(image_path)
+    dest = os.path.join(INPUT_DIR, capture_filename)
+    shutil.copy(image_path, dest)
+
+    update_state(
+        status      = "processing",
+        message     = "Test image loaded. Running object detection...",
+        capture_url = f"/static/input/{capture_filename}",
+        gif_url     = None,
+        detections  = [],
+    )
+
+    print(f"Test mode: running pipeline on {image_path}")
+    print("Open  http://localhost:5000  to watch progress.\n")
+    _run_pipeline_thread(dest, capture_filename)
+
+
 # ── Entry point ────────────────────────────────────────────────────────────────
 
 if __name__ == "__main__":
     flask_thread = threading.Thread(target=run_server, daemon=True)
     flask_thread.start()
 
-    camera_loop()   # blocks on main thread until Q is pressed
+    # Usage: python main.py --image path/to/test.jpg
+    if "--image" in sys.argv:
+        idx = sys.argv.index("--image")
+        test_image = sys.argv[idx + 1]
+        test_mode(test_image)
+        print("\nPipeline done. Browse to http://localhost:5000 to see the result.")
+        print("Press Ctrl+C to quit.")
+        while True:
+            threading.Event().wait(1)
+    else:
+        camera_loop()           # normal camera mode
