@@ -8,11 +8,12 @@ import cv2
 from PIL import Image, ImageFilter
 import torchvision.transforms.functional as TVF
 from diffusers import StableDiffusionInpaintPipeline
-from ultralytics import YOLO
+from ultralytics import YOLO, SAM
+from transformers import AutoProcessor, AutoModelForCausalLM
 from openai import OpenAI
 
 
-def load_models(hf_token, device="cuda"):
+def load_models(hf_token, detection_mode="yolo", device="cuda"):
     print("Loading Stable Diffusion inpainting pipeline...")
     pipe = StableDiffusionInpaintPipeline.from_pretrained(
         "runwayml/stable-diffusion-inpainting",
@@ -23,11 +24,35 @@ def load_models(hf_token, device="cuda"):
     pipe.enable_attention_slicing()
     print(f"  SD pipeline loaded on {device}.")
 
-    print("Loading YOLO segmentation model...")
-    yolo = YOLO("yolov8m-seg.pt")
-    print("  YOLO loaded.")
+    models = {}
 
-    return pipe, yolo
+    if detection_mode == "yolo":
+        print("Loading YOLO segmentation model...")
+        models["yolo"] = YOLO("yolov8m-seg.pt")
+        print("  YOLO loaded.")
+
+    elif detection_mode == "sam":
+        print("Loading SAM2 model...")
+        models["sam"] = SAM("sam2_b.pt")
+        print("  SAM2 loaded.")
+
+    elif detection_mode == "florence":
+        print("Loading Florence-2 model...")
+        models["florence_model"] = AutoModelForCausalLM.from_pretrained(
+            "microsoft/Florence-2-base",
+            torch_dtype=torch.float16,
+            trust_remote_code=True,
+        ).to(device)
+        models["florence_processor"] = AutoProcessor.from_pretrained(
+            "microsoft/Florence-2-base",
+            trust_remote_code=True,
+        )
+        print("  Florence-2 loaded.")
+        print("Loading SAM2 model...")
+        models["sam"] = SAM("sam2_b.pt")
+        print("  SAM2 loaded.")
+
+    return pipe, models
 
 
 # ── Object detection ───────────────────────────────────────────────────────────
@@ -77,6 +102,163 @@ def generate_object_masks(image, model, sort_by="confidence",
         print(f"  [{i}] {d['label']:20s} conf={d['confidence']:.2f}  "
               f"area={d['area']:,}px ({100*d['area']/(img_w*img_h):.1f}%)")
 
+    return detections
+
+
+# ── SAM detection ─────────────────────────────────────────────────────────────
+
+def _describe_region(cropped_image, client):
+    """Ask GPT-4o to name whatever is in a cropped mask region (2-4 words)."""
+    response = client.responses.create(
+        model="gpt-4.1",
+        instructions=(
+            "You are looking at a cropped region of a larger image. "
+            "Identify the single most prominent object or material visible. "
+            "Respond with 2-4 words only, no punctuation, no explanation."
+        ),
+        input=[{
+            "role": "user",
+            "content": [{
+                "type": "input_image",
+                "image_url": f"data:image/png;base64,{image_to_base64(cropped_image)}",
+            }],
+        }],
+        max_output_tokens=20,
+        temperature=0.3,
+    )
+    return response.output_text.strip().lower()
+
+
+def generate_sam_masks(image, sam_model, openai_client,
+                       max_segments=6, min_area=2000, feather_radius=11):
+    """
+    Segment everything in the image with SAM2, then ask GPT-4o to label
+    each region. Returns the same dict format as generate_object_masks.
+    Capped at max_segments largest regions to keep runtime predictable.
+    """
+    img_w, img_h = image.size
+    results = sam_model(image, verbose=False)
+
+    if not results or results[0].masks is None:
+        print("SAM: no masks found.")
+        return []
+
+    raw_masks = results[0].masks.data.cpu().numpy()  # (N, H, W) binary
+
+    candidates = []
+    for mask_arr in raw_masks:
+        # Resize mask to original image dimensions
+        mask_resized = cv2.resize(
+            mask_arr.astype(np.uint8) * 255,
+            (img_w, img_h),
+            interpolation=cv2.INTER_NEAREST,
+        )
+        area = int((mask_resized > 0).sum())
+        if area >= min_area:
+            candidates.append((area, mask_resized))
+
+    # Keep only the N largest to avoid too many GPT-4o calls
+    candidates.sort(key=lambda x: x[0], reverse=True)
+    candidates = candidates[:max_segments]
+
+    print(f"SAM: {len(candidates)} region(s) after filtering (asking GPT-4o to label each)...")
+
+    detections = []
+    img_array = np.array(image.convert("RGB"))
+
+    for i, (area, mask_arr) in enumerate(candidates):
+        # Crop the masked region for GPT-4o labelling
+        ys, xs = np.where(mask_arr > 0)
+        y1, y2, x1, x2 = ys.min(), ys.max(), xs.min(), xs.max()
+        cropped = Image.fromarray(img_array[y1:y2, x1:x2])
+
+        label = _describe_region(cropped, openai_client)
+        print(f"  [{i}] GPT-4o says: '{label}'  area={area:,}px")
+
+        mask_pil = Image.fromarray(mask_arr).convert("L")
+        if feather_radius > 0:
+            mask_pil = mask_pil.filter(ImageFilter.GaussianBlur(radius=feather_radius))
+
+        detections.append({
+            "mask":       mask_pil,
+            "label":      label,
+            "confidence": 1.0,   # SAM doesn't produce confidence scores
+            "area":       area,
+        })
+
+    return detections
+
+
+# ── Florence-2 + SAM detection ─────────────────────────────────────────────────
+
+def generate_florence_masks(image, florence_model, florence_processor, sam_model,
+                             feather_radius=11, min_area=500, device="cuda"):
+    """
+    Florence-2 open-vocabulary object detection → bounding boxes + labels,
+    then SAM2 converts each bounding box to a pixel-accurate mask.
+    """
+    img_w, img_h = image.size
+
+    # Florence-2 open-vocabulary detection
+    inputs = florence_processor(
+        text="<OD>", images=image, return_tensors="pt"
+    ).to(device, torch.float16)
+
+    with torch.no_grad():
+        generated_ids = florence_model.generate(
+            input_ids=inputs["input_ids"],
+            pixel_values=inputs["pixel_values"],
+            max_new_tokens=1024,
+            num_beams=3,
+        )
+
+    generated_text = florence_processor.batch_decode(
+        generated_ids, skip_special_tokens=False
+    )[0]
+    parsed = florence_processor.post_process_generation(
+        generated_text, task="<OD>", image_size=(img_w, img_h)
+    )
+
+    bboxes = parsed["<OD>"]["bboxes"]    # [[x1,y1,x2,y2], ...]
+    labels = parsed["<OD>"]["labels"]
+
+    print(f"Florence-2: {len(bboxes)} object(s) detected.")
+    for lbl, bb in zip(labels, bboxes):
+        print(f"  {lbl:30s}  bbox={[round(v) for v in bb]}")
+
+    if not bboxes:
+        return []
+
+    detections = []
+    for bbox, label in zip(bboxes, labels):
+        x1, y1, x2, y2 = [int(v) for v in bbox]
+
+        # SAM2 with bounding box prompt
+        sam_results = sam_model(image, bboxes=[[x1, y1, x2, y2]], verbose=False)
+
+        if not sam_results or sam_results[0].masks is None:
+            continue
+
+        mask_arr = sam_results[0].masks.data[0].cpu().numpy().astype(np.uint8) * 255
+        mask_arr = cv2.resize(mask_arr, (img_w, img_h), interpolation=cv2.INTER_NEAREST)
+
+        area = int((mask_arr > 0).sum())
+        if area < min_area:
+            continue
+
+        mask_pil = Image.fromarray(mask_arr).convert("L")
+        if feather_radius > 0:
+            mask_pil = mask_pil.filter(ImageFilter.GaussianBlur(radius=feather_radius))
+
+        detections.append({
+            "mask":       mask_pil,
+            "label":      label,
+            "confidence": 1.0,
+            "area":       area,
+        })
+
+    # Largest first
+    detections.sort(key=lambda d: d["area"], reverse=True)
     return detections
 
 
@@ -249,17 +431,18 @@ def assemble_gif(frames, output_path, frame_duration=300):
 
 # ── Top-level pipeline call ────────────────────────────────────────────────────
 
-def run_pipeline(image_path, output_dir, pipe, yolo_model, openai_client,
-                 sort_by="confidence", n_variants=2, num_inference_steps=50,
+def run_pipeline(image_path, output_dir, pipe, models, openai_client,
+                 detection_mode="yolo", sort_by="confidence",
+                 n_variants=2, num_inference_steps=50,
                  progress_callback=None):
     """
-    Full pipeline: image → YOLO detection → iterative inpainting → GIF.
+    Full pipeline: image → detection → iterative inpainting → GIF.
 
-    progress_callback(message: str) is called at each major step so the
-    Flask server can push status updates to the browser.
+    detection_mode : 'yolo' | 'sam' | 'florence'
+    models         : dict returned by load_models()
+    progress_callback(message: str) is called at each major step.
 
-    Returns (detections_info, gif_path) where detections_info is a list of
-    dicts safe to serialise as JSON {label, confidence, area}.
+    Returns (detections_info, gif_path).
     """
     os.makedirs(output_dir, exist_ok=True)
 
@@ -269,9 +452,21 @@ def run_pipeline(image_path, output_dir, pipe, yolo_model, openai_client,
             progress_callback(msg)
 
     image = Image.open(image_path).convert("RGB")
-    log("Image loaded. Running object detection...")
+    log(f"Image loaded. Running object detection [{detection_mode}]...")
 
-    detections = generate_object_masks(image, yolo_model, sort_by=sort_by)
+    if detection_mode == "yolo":
+        detections = generate_object_masks(image, models["yolo"], sort_by=sort_by)
+    elif detection_mode == "sam":
+        detections = generate_sam_masks(image, models["sam"], openai_client)
+    elif detection_mode == "florence":
+        detections = generate_florence_masks(
+            image,
+            models["florence_model"],
+            models["florence_processor"],
+            models["sam"],
+        )
+    else:
+        raise ValueError(f"Unknown detection_mode '{detection_mode}'. Choose yolo | sam | florence.")
 
     if not detections:
         log("No objects detected — try rearranging the collage.")

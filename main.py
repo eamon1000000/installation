@@ -14,17 +14,27 @@ from server import run_server, update_state
 from pipeline import load_models, run_pipeline
 
 # ── Config ─────────────────────────────────────────────────────────────────────
-CAMERA_INDEX = 0          # change if the wrong camera opens
-OUTPUT_DIR   = "static/output"
-INPUT_DIR    = "static/input"
+CAMERA_INDEX   = 0          # change if the wrong camera opens
+OUTPUT_DIR     = "static/output"
+INPUT_DIR      = "static/input"
+DETECTION_MODE = "yolo"     # overridden by --detection flag at runtime
 
 os.makedirs(OUTPUT_DIR, exist_ok=True)
 os.makedirs(INPUT_DIR, exist_ok=True)
 
+# Parse --detection flag early so load_models knows what to load
+if "--detection" in sys.argv:
+    _idx = sys.argv.index("--detection")
+    DETECTION_MODE = sys.argv[_idx + 1]
+    valid = ("yolo", "sam", "florence")
+    if DETECTION_MODE not in valid:
+        print(f"ERROR: --detection must be one of {valid}")
+        sys.exit(1)
+
 # ── Load models once at startup ────────────────────────────────────────────────
-print("Loading models (this takes ~30s the first time)...")
+print(f"Loading models (detection_mode='{DETECTION_MODE}')...")
 client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
-pipe, yolo_model = load_models(os.getenv("HF_TOKEN"))
+pipe, detection_models = load_models(os.getenv("HF_TOKEN"), detection_mode=DETECTION_MODE)
 print("All models ready.\n")
 
 # ── Pipeline state ─────────────────────────────────────────────────────────────
@@ -43,8 +53,9 @@ def _run_pipeline_thread(image_path, capture_filename):
             image_path       = image_path,
             output_dir       = OUTPUT_DIR,
             pipe             = pipe,
-            yolo_model       = yolo_model,
+            models           = detection_models,
             openai_client    = client,
+            detection_mode   = DETECTION_MODE,
             progress_callback= progress,
         )
 

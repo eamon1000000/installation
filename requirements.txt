@@ -14,3 +14,5 @@ numpy
 openai
 flask
 python-dotenv
+timm
+einops
