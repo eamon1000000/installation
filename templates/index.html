@@ -3,206 +3,248 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>ML Collage Installation</title>
+  <title>installation</title>
   <style>
     * { box-sizing: border-box; margin: 0; padding: 0; }
 
     body {
-      background: #0a0a0a;
-      color: #e8e8e8;
-      font-family: 'Courier New', monospace;
+      background: #f0ece4;
+      color: #1a1a1a;
+      font-family: 'Courier New', Courier, monospace;
+      font-size: 13px;
       min-height: 100vh;
-      display: flex;
-      flex-direction: column;
-      align-items: center;
-      padding: 2rem;
+      padding: 24px;
     }
 
-    h1 {
-      font-size: 1.1rem;
-      font-weight: normal;
-      letter-spacing: 0.3em;
-      text-transform: uppercase;
-      color: #555;
-      margin-bottom: 2rem;
-    }
-
-    /* ── Status bar ── */
-    #status-bar {
+    /* ── Titlebar ── */
+    #titlebar {
       display: flex;
       align-items: center;
-      gap: 1rem;
-      margin-bottom: 2.5rem;
+      justify-content: space-between;
+      border-bottom: 1px solid #1a1a1a;
+      padding-bottom: 6px;
+      margin-bottom: 20px;
     }
 
-    #status-dot {
-      width: 12px;
-      height: 12px;
-      border-radius: 50%;
-      background: #444;
-      transition: background 0.4s;
-      flex-shrink: 0;
-    }
-    #status-dot.idle       { background: #444; }
-    #status-dot.processing { background: #f5a623; animation: pulse 1s infinite; }
-    #status-dot.done       { background: #4caf50; }
-    #status-dot.error      { background: #e53935; }
-
-    @keyframes pulse {
-      0%, 100% { opacity: 1; }
-      50%       { opacity: 0.3; }
+    #titlebar-left {
+      display: flex;
+      align-items: center;
+      gap: 16px;
     }
 
-    #status-message {
-      font-size: 0.95rem;
-      color: #aaa;
+    #app-name {
+      font-size: 13px;
       letter-spacing: 0.05em;
     }
 
-    /* ── Main layout ── */
-    #main {
+    #status-text {
+      color: #666;
+    }
+
+    #status-text.processing { color: #b05a00; }
+    #status-text.done       { color: #1a1a1a; }
+    #status-text.error      { color: #900; }
+
+    /* ── Image row ── */
+    #images {
       display: grid;
       grid-template-columns: 1fr 1fr;
-      gap: 2rem;
-      width: 100%;
-      max-width: 1200px;
+      gap: 16px;
+      margin-bottom: 20px;
     }
 
-    .panel {
+    .img-pane {
+      border: 1px solid #1a1a1a;
+      background: #e8e4dc;
+    }
+
+    .img-pane-bar {
+      border-bottom: 1px solid #1a1a1a;
+      padding: 3px 8px;
       display: flex;
-      flex-direction: column;
-      gap: 0.75rem;
+      align-items: center;
+      gap: 8px;
+      background: #ddd9d1;
     }
 
-    .panel-label {
-      font-size: 0.7rem;
-      letter-spacing: 0.25em;
-      text-transform: uppercase;
+    .img-pane-bar span {
       color: #444;
     }
 
-    .panel img {
-      width: 100%;
-      border: 1px solid #1e1e1e;
-      background: #111;
-      display: block;
-    }
-
-    /* ── Detections ── */
-    #detections {
-      width: 100%;
-      max-width: 1200px;
-      margin-top: 2rem;
-    }
-
-    #detections-label {
-      font-size: 0.7rem;
-      letter-spacing: 0.25em;
-      text-transform: uppercase;
-      color: #444;
-      margin-bottom: 0.75rem;
-    }
-
-    #detection-list {
-      display: flex;
-      flex-wrap: wrap;
-      gap: 0.5rem;
-    }
-
-    .detection-chip {
-      background: #161616;
-      border: 1px solid #2a2a2a;
-      padding: 0.3rem 0.75rem;
-      font-size: 0.8rem;
-      color: #888;
-      letter-spacing: 0.05em;
-    }
-
-    .detection-chip span {
-      color: #e8e8e8;
-    }
-
-    /* ── Empty state ── */
-    .empty {
-      width: 100%;
+    .img-pane-body {
       aspect-ratio: 4/3;
-      background: #111;
-      border: 1px solid #1e1e1e;
       display: flex;
       align-items: center;
       justify-content: center;
-      color: #333;
-      font-size: 0.85rem;
-      letter-spacing: 0.1em;
+      color: #999;
+      font-size: 12px;
+    }
+
+    .img-pane-body img {
+      width: 100%;
+      display: block;
+    }
+
+    /* ── File explorer ── */
+    #explorer {
+      border: 1px solid #1a1a1a;
+    }
+
+    #explorer-bar {
+      border-bottom: 1px solid #1a1a1a;
+      padding: 3px 8px;
+      background: #ddd9d1;
+      display: flex;
+      gap: 24px;
+    }
+
+    #explorer-bar span {
+      color: #666;
+    }
+
+    #file-list {
+      min-height: 80px;
+    }
+
+    .file-row {
+      display: grid;
+      grid-template-columns: 20px 180px 1fr 90px;
+      align-items: baseline;
+      padding: 3px 8px;
+      border-bottom: 1px solid #ddd9d1;
+      gap: 12px;
+      line-height: 1.5;
+    }
+
+    .file-row:last-child { border-bottom: none; }
+
+    .file-row:hover { background: #e8e4dc; }
+
+    .file-icon { color: #666; text-align: center; }
+
+    .file-name {
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+
+    .file-prompt {
+      color: #555;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+
+    .file-kind {
+      color: #999;
+      text-align: right;
+      font-size: 11px;
+    }
+
+    .file-kind.person      { color: #7a4a00; }
+    .file-kind.conditional { color: #004a7a; }
+    .file-kind.gpt         { color: #2a6a2a; }
+
+    #empty-msg {
+      padding: 10px 8px;
+      color: #999;
     }
   </style>
 </head>
 <body>
 
-  <h1>ML Collage Installation</h1>
-
-  <div id="status-bar">
-    <div id="status-dot" class="idle"></div>
-    <div id="status-message">Waiting for capture...</div>
+  <!-- titlebar -->
+  <div id="titlebar">
+    <div id="titlebar-left">
+      <span id="app-name">installation.py</span>
+      <span id="status-text">—</span>
+    </div>
+    <span style="color:#999">localhost:5000</span>
   </div>
 
-  <div id="main">
-    <div class="panel">
-      <div class="panel-label">Captured Image</div>
-      <div id="capture-wrap" class="empty">no capture yet</div>
+  <!-- images -->
+  <div id="images">
+    <div class="img-pane">
+      <div class="img-pane-bar">
+        <span>&#128247;</span>
+        <span>capture</span>
+      </div>
+      <div class="img-pane-body" id="capture-body">no capture</div>
     </div>
-    <div class="panel">
-      <div class="panel-label">Generated Output</div>
-      <div id="output-wrap" class="empty">awaiting pipeline...</div>
+    <div class="img-pane">
+      <div class="img-pane-bar">
+        <span>&#127916;</span>
+        <span>output.gif</span>
+      </div>
+      <div class="img-pane-body" id="output-body">awaiting pipeline</div>
     </div>
   </div>
 
-  <div id="detections">
-    <div id="detections-label">Detected Objects</div>
-    <div id="detection-list"></div>
+  <!-- file explorer -->
+  <div id="explorer">
+    <div id="explorer-bar">
+      <span>name</span>
+      <span>prompt</span>
+      <span style="margin-left:auto">kind</span>
+    </div>
+    <div id="file-list">
+      <div id="empty-msg">—</div>
+    </div>
   </div>
 
   <script>
     let lastGifUrl = null;
+    let lastFileCount = 0;
 
     function setStatus(status, message) {
-      const dot = document.getElementById('status-dot');
-      dot.className = '';
-      dot.classList.add(status);
-      document.getElementById('status-message').textContent = message;
+      const el = document.getElementById('status-text');
+      el.textContent = message;
+      el.className = status;
     }
 
     function updateCapture(url) {
-      const wrap = document.getElementById('capture-wrap');
       if (!url) return;
-      wrap.className = '';
-      wrap.innerHTML = `<img src="${url}" alt="captured" style="width:100%;display:block;">`;
+      const body = document.getElementById('capture-body');
+      body.innerHTML = `<img src="${url}" alt="capture">`;
     }
 
     function updateOutput(url) {
-      const wrap = document.getElementById('output-wrap');
+      const body = document.getElementById('output-body');
       if (!url) {
-        wrap.className = 'empty';
-        wrap.innerHTML = 'awaiting pipeline...';
+        body.innerHTML = 'awaiting pipeline';
         return;
       }
-      wrap.className = '';
-      wrap.innerHTML = `<img src="${url}" alt="output gif" style="width:100%;display:block;">`;
+      body.innerHTML = `<img src="${url}" alt="output">`;
     }
 
-    function updateDetections(detections) {
-      const list = document.getElementById('detection-list');
-      if (!detections || detections.length === 0) {
-        list.innerHTML = '<span style="color:#333;font-size:0.8rem">none yet</span>';
+    function icon(type) {
+      if (type === 'person')      return '&#128100;';
+      if (type === 'conditional') return '&#128196;';
+      return '&#128196;';
+    }
+
+    function updateFiles(files) {
+      const list = document.getElementById('file-list');
+      const empty = document.getElementById('empty-msg');
+
+      if (!files || files.length === 0) {
+        list.innerHTML = '';
+        list.appendChild(empty);
+        lastFileCount = 0;
         return;
       }
-      list.innerHTML = detections.map(d =>
-        `<div class="detection-chip">
-          <span>${d.label}</span>
-          &nbsp;${(d.confidence * 100).toFixed(0)}%
-          &nbsp;<span style="color:#555">${(d.area/1000).toFixed(1)}k px</span>
-        </div>`
-      ).join('');
+
+      if (files.length === lastFileCount) return;
+      lastFileCount = files.length;
+
+      list.innerHTML = files.map((f, i) => `
+        <div class="file-row">
+          <span class="file-icon">${icon(f.type)}</span>
+          <span class="file-name">${String(i + 1).padStart(2, '0')}_${f.label}</span>
+          <span class="file-prompt">${f.prompt}</span>
+          <span class="file-kind ${f.type}">${f.type}</span>
+        </div>
+      `).join('');
     }
 
     async function poll() {
@@ -212,9 +254,8 @@
 
         setStatus(data.status, data.message);
         updateCapture(data.capture_url);
-        updateDetections(data.detections);
+        updateFiles(data.files || []);
 
-        // Only update the GIF element when the URL actually changes
         if (data.gif_url && data.gif_url !== lastGifUrl) {
           lastGifUrl = data.gif_url;
           updateOutput(data.gif_url);
@@ -223,12 +264,9 @@
           updateOutput(null);
         }
 
-      } catch (e) {
-        // server not up yet — keep trying
-      }
+      } catch (e) { /* server not up yet */ }
     }
 
-    // Poll every 2 seconds
     poll();
     setInterval(poll, 2000);
   </script>

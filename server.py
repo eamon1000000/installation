@@ -9,6 +9,7 @@ _state = {
     "status":      "idle",       # idle | processing | done | error
     "message":     "Press SPACE in the camera window to capture.",
     "detections":  [],           # [{label, confidence, area}, ...]
+    "files":       [],           # [{label, prompt, type}, ...] — built up during pipeline
     "gif_url":     None,
     "capture_url": None,
 }

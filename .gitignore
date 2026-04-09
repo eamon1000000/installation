@@ -1,0 +1,9 @@
+.env
+__pycache__/
+*.pyc
+*.pyo
+sam2_b.pt
+*.pt
+*.safetensors
+venv/
+.claude/
