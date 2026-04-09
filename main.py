@@ -52,6 +52,21 @@ CONDITIONAL_PROMPTS = [
         "Lush, intricate, gloriously alive.",
     ),
 
+    (
+        ["bird", "paper bird", "bird silhouette", "bird cutout"],
+        "A vivid tropical bird in blazing sunshine yellow — sleek and glossy like lacquered enamel, "
+        "wings fanned wide, every feather crisp and jewel-bright, beak a sharp stroke of tangerine, "
+        "eye a single gleaming black bead. Luminous, electric, impossibly saturated.",
+    ),
+
+    (
+        ["horse", "paper horse", "horse silhouette", "horse cutout"],
+        "A small toy horse, chunky and joyful — painted in bold primary colours with a glossy finish, "
+        "thick blocky legs, a bright flowing mane in candy pink or electric blue, "
+        "surface smooth as a fairground carousel, cheerful and slightly surreal. "
+        "Charming, vivid, and unmistakably a toy.",
+    ),
+
 ]
 
 os.makedirs(OUTPUT_DIR, exist_ok=True)
