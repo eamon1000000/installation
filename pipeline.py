@@ -1,7 +1,6 @@
 import os
 import io
 import json
-import math
 import base64
 import numpy as np
 from concurrent.futures import ThreadPoolExecutor, as_completed
@@ -43,7 +42,7 @@ def load_models(hf_token, backend="sdxl", device="cuda"):
     return pipe, sam
 
 
-# ── SAM detection ─────────────────────────────────────────────────────────────
+# ── SAM detection ──────────────────────────────────────────────────────────────
 
 def _draw_numbered_segments(image, candidates):
     """Overlay numbered outlines on the image for all candidates."""
@@ -128,7 +127,7 @@ def _gpt_select(vis_image, pool, openai_client, feather_radius=3):
             "role": "user",
             "content": [
                 {"type": "input_text",
-                 "text": "Find all green paper clovers in this segmented image."},
+                 "text": "Find all paper cutout shapes — clovers, birds, and horses — in this segmented image."},
                 {"type": "input_image",
                  "image_url": f"data:image/png;base64,{image_to_base64(vis_image)}"},
             ],
@@ -162,83 +161,12 @@ def _gpt_select(vis_image, pool, openai_client, feather_radius=3):
     return detections
 
 
-def generate_sam_masks(image, sam_model, openai_client,
-                       max_segments=10, min_area=2000, feather_radius=3,
-                       intermediate_dir=None):
-    """Convenience wrapper: SAM + GPT in one call (used by single-image mode)."""
-    vis_image, pool = _sam_candidates(image, sam_model, min_area, max_segments,
-                                      intermediate_dir, frame_idx=0)
-    if not pool:
-        return []
-    print(f"SAM: {len(pool)} candidates — asking GPT-4.1...")
-    detections = _gpt_select(vis_image, pool, openai_client, feather_radius)
-    print(f"  Found: {[d['label'] for d in detections]}")
-    return detections
-
 # ── Prompt generation ──────────────────────────────────────────────────────────
 
 def image_to_base64(image):
     buf = io.BytesIO()
     image.save(buf, format="PNG")
     return base64.b64encode(buf.getvalue()).decode("utf-8")
-
-
-PERSON_KEYWORDS = [
-    "person", "human", "man", "woman", "people", "figure", "standing",
-    "seated person", "sitting person", "individual", "someone", "body",
-    "portrait", "face", "visitor", "student", "child", "adult", "girl", "boy",
-]
-
-
-def _is_person(label):
-    label_lower = label.lower()
-    return any(kw in label_lower for kw in PERSON_KEYWORDS)
-
-
-def generate_person_inpaint_prompt(image, mask, client):
-    """
-    Crop the masked person region, send it to GPT, and ask it to describe
-    their specific features before generating an uncannifying inpaint prompt.
-    """
-    img_array = np.array(image.convert("RGB"))
-    mask_array = np.array(mask.resize(image.size, Image.NEAREST))
-    ys, xs = np.where(mask_array > 127)
-    if len(ys) == 0:
-        cropped = image
-    else:
-        y1, y2, x1, x2 = ys.min(), ys.max(), xs.min(), xs.max()
-        cropped = Image.fromarray(img_array[y1:y2, x1:x2])
-
-    response = client.responses.create(
-        model="gpt-4.1",
-        instructions=(
-            "You are a prompt generator for an AI inpainting model in a surreal art installation. "
-            "You will be shown a cropped image of a person. "
-            "Carefully observe their specific features: hair colour and texture, face shape, "
-            "skin tone, eye colour, clothing colours and style, build, expression, posture. "
-            "Write a single 2-sentence inpainting prompt that takes this specific person and "
-            "transforms them into a hyper-real, uncanny, golden android version of themselves — "
-            "their recognisable features are preserved but pushed to an extreme: "
-            "skin becomes luminous and glassy like polished amber resin, "
-            "their specific hair colour is retained but lacquered into perfect sculptural geometry, "
-            "eyes are wide, chromatic and slightly too large, "
-            "cheekbones and jawline become architectural and idealised. "
-            "Clothing becomes glossy and saturated — amplify whatever they are wearing. "
-            "The overall effect: Ryan Trecartin video strangeness, high-fashion editorial, "
-            "sci-fi glamour, beautiful and deeply unsettling. "
-            "Return ONLY the prompt text, nothing else."
-        ),
-        input=[{
-            "role": "user",
-            "content": [{
-                "type": "input_image",
-                "image_url": f"data:image/png;base64,{image_to_base64(cropped)}",
-            }],
-        }],
-        max_output_tokens=200,
-        temperature=0.9,
-    )
-    return response.output_text.strip()
 
 
 def _match_conditional_prompt(label, conditional_prompts):
@@ -251,6 +179,7 @@ def _match_conditional_prompt(label, conditional_prompts):
 
 
 def generate_inpaint_prompt(image, client, iteration=0, detected_label=None):
+    """GPT fallback prompt — fires only when no conditional prompt matches."""
     instructions = (
         "You are a prompt generator for an AI inpainting model in a surreal art installation. "
         "The installation exists in a single aesthetic world: mid-century modern meets science fiction — "
@@ -266,30 +195,29 @@ def generate_inpaint_prompt(image, client, iteration=0, detected_label=None):
         "- 1-2 sentences maximum. Return ONLY the prompt text, nothing else."
     )
 
-    temperature = min(0.8 + (iteration * 0.02) + np.random.random(), 1.1)
+    import numpy as _np
+    temperature = min(0.8 + (iteration * 0.02) + _np.random.random(), 1.1)
 
     response = client.responses.create(
         model="gpt-4.1",
         instructions=instructions,
-        input=[
-            {
-                "role": "user",
-                "content": [
-                    {
-                        "type": "input_text",
-                        "text": (
-                            f"Iteration {iteration}. "
-                            f"Object to replace: {detected_label}. "
-                            "Write a prompt for what should replace the masked region."
-                        ),
-                    },
-                    {
-                        "type": "input_image",
-                        "image_url": f"data:image/png;base64,{image_to_base64(image)}",
-                    },
-                ],
-            }
-        ],
+        input=[{
+            "role": "user",
+            "content": [
+                {
+                    "type": "input_text",
+                    "text": (
+                        f"Iteration {iteration}. "
+                        f"Object to replace: {detected_label}. "
+                        "Write a prompt for what should replace the masked region."
+                    ),
+                },
+                {
+                    "type": "input_image",
+                    "image_url": f"data:image/png;base64,{image_to_base64(image)}",
+                },
+            ],
+        }],
         max_output_tokens=150,
         temperature=temperature,
     )
@@ -313,6 +241,7 @@ def inpaint_sdxl(pipe, image, mask, prompt,
                  guidance_scale=13.0,
                  strength=1.0,
                  grey_fill=True,
+                 seed=None,
                  device="cuda"):
     """
     SDXL inpainting. grey_fill=True replaces the masked region with mid-grey
@@ -321,7 +250,6 @@ def inpaint_sdxl(pipe, image, mask, prompt,
     mask_l = mask.convert("L")
 
     if grey_fill:
-        # Fill masked region with mid-grey so the model isn't anchored to white
         grey = Image.new("RGB", image.size, (128, 128, 128))
         image_in = Image.composite(grey, image, mask_l)
     else:
@@ -329,6 +257,8 @@ def inpaint_sdxl(pipe, image, mask, prompt,
 
     image_1024 = image_in.resize((1024, 1024), Image.LANCZOS)
     mask_1024  = mask_l.resize((1024, 1024), Image.NEAREST)
+
+    generator = torch.Generator(device=device).manual_seed(seed) if seed is not None else None
 
     results = pipe(
         prompt=prompt,
@@ -341,6 +271,7 @@ def inpaint_sdxl(pipe, image, mask, prompt,
         guidance_scale=guidance_scale,
         strength=strength,
         num_images_per_prompt=n_variants,
+        generator=generator,
     ).images
 
     for i in range(len(results)):
@@ -354,9 +285,7 @@ def inpaint_sd15(pipe, image, mask, prompt,
                  num_inference_steps=50,
                  guidance_scale=12.0,
                  device="cuda"):
-    """
-    SD 1.5 inpainting via the standard pipeline call.
-    """
+    """SD 1.5 inpainting via the standard pipeline call."""
     image_512 = image.resize((512, 512), Image.LANCZOS)
     mask_512  = mask.resize((512, 512), Image.NEAREST)
 
@@ -401,12 +330,13 @@ def assemble_gif(frames, output_path, frame_duration=150):
     )
 
 
-# ── Burst pipeline ────────────────────────────────────────────────────────────
+# ── Burst pipeline ─────────────────────────────────────────────────────────────
 
 def run_pipeline_burst(image_paths, output_dir, pipe, sam_model, openai_client,
                        backend="sdxl",
                        num_inference_steps=50,
                        guidance_scale=13.0, strength=1.0, grey_fill=True,
+                       seed=None,
                        sam_min_area=500,
                        conditional_prompts=None,
                        progress_callback=None,
@@ -433,7 +363,7 @@ def run_pipeline_burst(image_paths, output_dir, pipe, sam_model, openai_client,
     log(f"Loaded {len(images)} image(s). Running SAM on all frames...")
 
     # ── Phase 1: SAM (sequential — GPU-bound) ─────────────────────────────────
-    sam_results = []   # [(frame_idx, image, vis_image, pool)]
+    sam_results = []
     for i, img in enumerate(images):
         log(f"  SAM frame {i + 1}/{len(images)}...")
         vis_image, pool = _sam_candidates(img, sam_model,
@@ -451,7 +381,7 @@ def run_pipeline_burst(image_paths, output_dir, pipe, sam_model, openai_client,
 
     # ── Phase 2: GPT selection (parallel — API-bound) ─────────────────────────
     log("Running GPT selection on all frames in parallel...")
-    frame_detections = {}   # frame_idx → (image, detections)
+    frame_detections = {}
 
     def _select(args):
         fi, img, vis_image, pool = args
@@ -464,12 +394,12 @@ def run_pipeline_burst(image_paths, output_dir, pipe, sam_model, openai_client,
             fi, img, dets = future.result()
             if dets:
                 frame_detections[fi] = (img, dets)
-                log(f"  Frame {fi + 1}: {len(dets)} clover(s).")
+                log(f"  Frame {fi + 1}: {len(dets)} shape(s) found — {[d['label'] for d in dets]}")
             else:
-                log(f"  Frame {fi + 1}: no clovers — skipping.")
+                log(f"  Frame {fi + 1}: no shapes detected — skipping.")
 
     if not frame_detections:
-        log("No clovers detected in any frame.")
+        log("No shapes detected in any frame.")
         return [], None
 
     # ── Phase 3: Prompt generation (parallel across all detections) ────────────
@@ -479,7 +409,7 @@ def run_pipeline_burst(image_paths, output_dir, pipe, sam_model, openai_client,
         for fi, (img, dets) in frame_detections.items()
         for di, d in enumerate(dets)
     ]
-    prompt_map = {}   # (fi, di) → (prompt, type)
+    prompt_map = {}
 
     def _build_prompt(args):
         fi, di, d = args
@@ -497,12 +427,12 @@ def run_pipeline_burst(image_paths, output_dir, pipe, sam_model, openai_client,
             key, p, pt = future.result()
             prompt_map[key] = (p, pt)
             fi, di = key
-            log(f"  Frame {fi + 1} clover {di + 1} ({pt}): {p[:70]}...")
+            log(f"  Frame {fi + 1} shape {di + 1} ({pt}): {p[:70]}...")
             if file_callback:
                 label = frame_detections[fi][1][di]["label"]
                 file_callback({"label": label, "prompt": p, "type": pt})
 
-    # ── Phase 4: Inpainting + GIF assembly (sequential — GPU-bound) ───────────
+    # ── Phase 4: Inpainting + documentation saves (sequential — GPU-bound) ────
     log("Inpainting...")
     gif_path   = os.path.join(output_dir, "output.gif")
     gif_frames = []
@@ -510,10 +440,24 @@ def run_pipeline_burst(image_paths, output_dir, pipe, sam_model, openai_client,
     for fi in sorted(frame_detections.keys()):
         orig_img, dets = frame_detections[fi]
         current = orig_img.copy()
+        img_arr = np.array(orig_img)
 
         for di, d in enumerate(dets):
             prompt, _ = prompt_map.get((fi, di), ("", "gpt"))
-            log(f"  Frame {fi + 1}, clover {di + 1}/{len(dets)}...")
+            slug = d["label"].replace(" ", "_")
+            log(f"  Frame {fi + 1}, {d['label']} ({di + 1}/{len(dets)})...")
+
+            # Save mask
+            d["mask"].save(
+                os.path.join(intermediate_dir, f"mask_f{fi:02d}_d{di:02d}_{slug}.png"))
+
+            # Save original region crop (bounding box of mask)
+            mask_arr = np.array(d["mask"].resize(orig_img.size, Image.NEAREST))
+            ys, xs = np.where(mask_arr > 127)
+            if len(ys):
+                y1, y2, x1, x2 = ys.min(), ys.max(), xs.min(), xs.max()
+                Image.fromarray(img_arr[y1:y2, x1:x2]).save(
+                    os.path.join(intermediate_dir, f"region_f{fi:02d}_d{di:02d}_{slug}.png"))
 
             if backend == "sdxl":
                 result = inpaint_sdxl(pipe, current, d["mask"], prompt,
@@ -521,7 +465,8 @@ def run_pipeline_burst(image_paths, output_dir, pipe, sam_model, openai_client,
                                       num_inference_steps=num_inference_steps,
                                       guidance_scale=guidance_scale,
                                       strength=strength,
-                                      grey_fill=grey_fill)
+                                      grey_fill=grey_fill,
+                                      seed=seed)
             else:
                 result = inpaint_sd15(pipe, current, d["mask"], prompt,
                                       n_variants=1,
@@ -529,6 +474,13 @@ def run_pipeline_burst(image_paths, output_dir, pipe, sam_model, openai_client,
                                       guidance_scale=guidance_scale)
 
             frame_result = result[0].resize(orig_size, Image.LANCZOS)
+
+            # Save inpainted region crop
+            inpainted_arr = np.array(frame_result)
+            if len(ys):
+                Image.fromarray(inpainted_arr[y1:y2, x1:x2]).save(
+                    os.path.join(intermediate_dir, f"inpainted_f{fi:02d}_d{di:02d}_{slug}.png"))
+
             current = Image.composite(frame_result, current, d["mask"].convert("L"))
 
         # First frame: original + inpainted. All subsequent: inpainted only.
@@ -547,134 +499,5 @@ def run_pipeline_burst(image_paths, output_dir, pipe, sam_model, openai_client,
         {"label": d["label"], "confidence": round(d["confidence"], 2), "area": d["area"]}
         for _, dets in (frame_detections[fi] for fi in sorted(frame_detections))
         for d in dets
-    ]
-    return detections_info, gif_path
-
-
-# ── Single-image pipeline (kept for reference / debug) ────────────────────────
-
-def run_pipeline(image_path, output_dir, pipe, sam_model, openai_client,
-                 backend="sdxl",
-                 n_variants=1, num_inference_steps=50,
-                 guidance_scale=13.0, strength=1.0, grey_fill=True,
-                 sam_max_segments=10, sam_min_area=500,
-                 conditional_prompts=None,
-                 progress_callback=None,
-                 file_callback=None,
-                 gif_callback=None):
-    """
-    Full pipeline: image → SAM2 detection → iterative inpainting → GIF.
-
-    Returns (detections_info, gif_path).
-    """
-    os.makedirs(output_dir, exist_ok=True)
-    intermediate_dir = os.path.join(os.path.dirname(output_dir), "intermediate")
-    if os.path.exists(intermediate_dir):
-        import shutil
-        shutil.rmtree(intermediate_dir)
-    os.makedirs(intermediate_dir)
-
-    def log(msg):
-        print(msg)
-        if progress_callback:
-            progress_callback(msg)
-
-    image    = Image.open(image_path).convert("RGB")
-    orig_size = image.size   # (w, h) — preserved throughout for aspect ratio
-    log("Image loaded. Running SAM2 segmentation...")
-
-    detections = generate_sam_masks(image, sam_model, openai_client,
-                                    max_segments=sam_max_segments,
-                                    min_area=sam_min_area,
-                                    intermediate_dir=intermediate_dir)
-
-    if not detections:
-        log("No objects detected — try rearranging the collage.")
-        return [], None
-
-    labels = [d["label"] for d in detections]
-    log(f"Detected: {labels}. Generating prompts in parallel...")
-
-    # ── Generate all prompts concurrently before inpainting begins ────────────
-    def _build_prompt(args):
-        i, d = args
-        if _is_person(d["label"]):
-            p = generate_person_inpaint_prompt(image, d["mask"], openai_client)
-            return i, p, "person"
-        conditional = _match_conditional_prompt(d["label"], conditional_prompts or [])
-        if conditional:
-            return i, conditional, "conditional"
-        p = generate_inpaint_prompt(image, openai_client, iteration=i, detected_label=d["label"])
-        return i, p, "gpt"
-
-    prompts     = [None] * len(detections)
-    prompt_types = [None] * len(detections)
-    with ThreadPoolExecutor(max_workers=min(len(detections), 8)) as ex:
-        futures = {ex.submit(_build_prompt, (i, d)): i for i, d in enumerate(detections)}
-        for future in as_completed(futures):
-            i, p, pt = future.result()
-            prompts[i]      = p
-            prompt_types[i] = pt
-            log(f"  [{i+1}] prompt ready ({pt}): {p[:80]}...")
-
-    log("All prompts ready. Starting inpainting...")
-
-    # Save masks/previews once upfront before inpainting begins
-    for i, d in enumerate(detections):
-        slug = d["label"].replace(" ", "_")[:20]
-        d["mask"].save(os.path.join(intermediate_dir, f"mask_{i:02d}_{slug}.png"))
-
-    gif_path    = os.path.join(output_dir, "output.gif")
-    all_frames  = [image]
-    current_img = image.copy()
-
-    # Outer loop: rounds. Inner loop: segments.
-    # Each round does one inpainting pass across all segments,
-    # so the GIF builds as: seg1r1, seg2r1, seg3r1, seg1r2, seg2r2 ...
-    for round_idx in range(n_variants):
-        log(f"Round {round_idx + 1}/{n_variants}...")
-        for i, d in enumerate(detections):
-            log(f"  [{i+1}/{len(detections)}] '{d['label']}'...")
-
-            prompt      = prompts[i]
-            prompt_type = prompt_types[i]
-            if round_idx == 0 and file_callback:
-                file_callback({"label": d["label"], "prompt": prompt, "type": prompt_type})
-
-            if backend == "sdxl":
-                result = inpaint_sdxl(
-                    pipe, current_img, d["mask"], prompt,
-                    n_variants=1,
-                    num_inference_steps=num_inference_steps,
-                    guidance_scale=guidance_scale,
-                    strength=strength,
-                    grey_fill=grey_fill,
-                )
-            else:
-                result = inpaint_sd15(
-                    pipe, current_img, d["mask"], prompt,
-                    n_variants=1,
-                    num_inference_steps=num_inference_steps,
-                    guidance_scale=guidance_scale,
-                )
-
-            frame_orig  = result[0].resize(orig_size, Image.LANCZOS)
-            current_img = Image.composite(frame_orig, current_img, d["mask"].convert("L"))
-            all_frames.append(frame_orig)
-
-            slug = d["label"].replace(" ", "_")[:20]
-            frame_orig.save(os.path.join(output_dir, f"r{round_idx:02d}_{i:02d}_{slug}.png"))
-
-            # Push updated GIF to browser after every single frame
-            _save_gif_now(all_frames, orig_size, gif_path)
-            if gif_callback:
-                gif_callback(gif_path)
-            log(f"    GIF updated ({len(all_frames)} frames).")
-
-    log("Done.")
-
-    detections_info = [
-        {"label": d["label"], "confidence": round(d["confidence"], 2), "area": d["area"]}
-        for d in detections
     ]
     return detections_info, gif_path

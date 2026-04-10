@@ -34,6 +34,7 @@ SD_STEPS = 50                   # denoising steps
 SDXL_GUIDANCE  = 13.0           # prompt adherence — higher = more literal (7-16)
 SDXL_STRENGTH  = 0.9            # 1.0 = complete disregard for original region
 SDXL_GREY_FILL = True           # replace masked region with grey before inpainting
+SDXL_SEED      = 42           # set to an integer for reproducible results, None = random
 
 # ── SD 1.5 parameters (used when SD_BACKEND = "sd15") ─────────────────────────
 SD15_GUIDANCE  = 12.0           # prompt adherence for SD 1.5 (7-15)
@@ -55,7 +56,7 @@ CONDITIONAL_PROMPTS = [
     (
         ["bird", "paper bird", "bird silhouette", "bird cutout"],
         "A vivid tropical bird in blazing sunshine yellow — sleek and glossy like lacquered enamel, "
-        "wings fanned wide, every feather crisp and jewel-bright, beak a sharp stroke of tangerine, "
+        "wings tucked, side view of bird, every feather crisp and jewel-bright, beak a sharp stroke of tangerine, "
         "eye a single gleaming black bead. Luminous, electric, impossibly saturated.",
     ),
 
@@ -64,7 +65,7 @@ CONDITIONAL_PROMPTS = [
         "A small toy horse, chunky and joyful — painted in bold primary colours with a glossy finish, "
         "thick blocky legs, a bright flowing mane in candy pink or electric blue, "
         "surface smooth as a fairground carousel, cheerful and slightly surreal. "
-        "Charming, vivid, and unmistakably a toy.",
+        "Charming, vivid, and unmistakably a toy. side view of the horse.",
     ),
 
 ]
@@ -113,6 +114,7 @@ def _run_pipeline_thread(image_paths, capture_filenames):
             guidance_scale      = SDXL_GUIDANCE if SD_BACKEND == "sdxl" else SD15_GUIDANCE,
             strength            = SDXL_STRENGTH,
             grey_fill           = SDXL_GREY_FILL,
+            seed                = SDXL_SEED,
             sam_min_area        = SAM_MIN_AREA,
             conditional_prompts = CONDITIONAL_PROMPTS,
             progress_callback   = progress,
